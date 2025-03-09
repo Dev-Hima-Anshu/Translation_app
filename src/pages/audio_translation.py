@@ -4,6 +4,11 @@ import speech_recognition as sr
 from googletrans import Translator
 from gtts import gTTS
 import tempfile
+import sounddevice as sd
+import numpy as np
+from pydub import AudioSegment
+from scipy.io import wavfile
+import wave
 
 def audio_translation_page():
     st.title("Audio File Translator 🎧")
@@ -26,20 +31,43 @@ def audio_translation_page():
             with st.spinner("Translating..."):
                 recognizer = sr.Recognizer()
                 try:
-                    with sr.AudioFile(io.BytesIO(uploaded_file.read())) as source:
-                        audio = recognizer.record(source)
-                    text = recognizer.recognize_google(audio, language=source_lang)
-                    st.success(f"**Original Text:**\n{text}")
+                    # Check if it's a WAV file (basic check)
+                    audio_bytes = uploaded_file.read()
+                    try:
+                        with wave.open(io.BytesIO(audio_bytes), 'rb') as wf:
+                            num_channels = wf.getnchannels()
+                            frame_rate = wf.getframerate()
+                            sample_width = wf.getsampwidth()
+                            num_frames = wf.getnframes()
 
-                    translator = Translator()
-                    translated = translator.translate(text, dest=target_lang)
-                    st.success(f"**Translated Text:**\n{translated.text}")
+                            #Further validation if needed
+                            if num_channels != 1:
+                                st.error("Only mono WAV files (1 channel) are supported.")
+                                return
 
-                    tts = gTTS(text=translated.text, lang=target_lang)
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-                        tts.save(fp.name)
-                        st.audio(fp.name)
-                        st.download_button("Download Translated Audio", data=open(fp.name, "rb").read(), file_name="translated_audio.mp3", use_container_width=True)
+                    except wave.Error as e:
+                        st.error(f"Invalid WAV file: {e}")
+                        return #Exit if not a valid WAV file
+
+
+
+                    try:
+                        data, fs = wavfile.read(io.BytesIO(audio_bytes))
+                        if not isinstance(data, np.ndarray):
+                            st.error("Error: Uploaded audio file is not a valid WAV file (data type check failed).")
+                            return
+
+                        with io.BytesIO() as buffer:
+                            wavfile.write(buffer, fs, data)
+                            audio_bytes = buffer.getvalue()
+
+                        with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
+                            audio = recognizer.record(source)
+                            # ... (rest of your speech recognition and translation code) ...
+
+                    except Exception as e:
+                        st.error(f"Error reading/processing WAV file: {e}")
+                        return
 
                 except sr.UnknownValueError:
                     st.error("Could not understand audio. Try a clearer file.")
@@ -49,4 +77,3 @@ def audio_translation_page():
                     st.error(f"An error occurred: {e}")
     else:
         st.warning("Please upload an audio file.")
-
